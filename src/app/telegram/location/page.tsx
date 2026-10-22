@@ -1,4 +1,5 @@
-﻿"use client";
+﻿
+"use client";
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
@@ -10,27 +11,29 @@ const LocationMap = dynamic(() => import("./location-map"), {
 
 export default function TelegramLocationPage() {
   const [token, setToken] = useState("");
-  const [lat, setLat] = useState("41.2995");
-  const [lng, setLng] = useState("69.2401");
+  const [lat, setLat] = useState(41.2995);
+  const [lng, setLng] = useState(69.2401);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState(false);
 
   useEffect(() => {
     setToken(new URLSearchParams(window.location.search).get("token") || "");
   }, []);
 
   async function sendLocation() {
-    const latitude = Number(lat);
-    const longitude = Number(lng);
+    if (!token) {
+      setMessage("Havola noto‘g‘ri yoki token topilmadi. Botdan yangi havola oling.");
+      return;
+    }
 
     if (
-      !token ||
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude) ||
-      latitude < 37 || latitude > 46 ||
-      longitude < 55 || longitude > 74
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat < 37 || lat > 46 ||
+      lng < 55 || lng > 74
     ) {
-      setMessage("Token yoki koordinatalar noto‘g‘ri.");
+      setMessage("O‘zbekiston hududidan joy tanlang.");
       return;
     }
 
@@ -41,87 +44,80 @@ export default function TelegramLocationPage() {
       const response = await fetch("/api/telegram/location", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, lat: latitude, lng: longitude }),
+        body: JSON.stringify({ token, lat, lng }),
       });
 
       const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(result.error || "Joylashuvni saqlab bo‘lmadi.");
+        throw new Error(result.error || "Joylashuvni yuborib bo‘lmadi.");
       }
 
-      setMessage("Joylashuv yuborildi! Telegram botdagi javobni tekshiring.");
+      setMessage("Joylashuv botga yuborildi! Telegramga qayting.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Xatolik yuz berdi.");
+      setMessage(
+        error instanceof Error ? error.message : "Xatolik yuz berdi."
+      );
     } finally {
       setBusy(false);
     }
   }
 
-  function useMyLocation() {
-    if (!navigator.geolocation) {
-      setMessage("Bu qurilmada GPS mavjud emas.");
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLat(position.coords.latitude.toFixed(6));
-        setLng(position.coords.longitude.toFixed(6));
-        setMessage("Joylashuv olindi. Endi tasdiqlang.");
-      },
-      () => setMessage("Joylashuvga ruxsat berilmadi. Xaritadan tanlang."),
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  }
-
   return (
-    <main style={{ maxWidth: 800, margin: "24px auto", padding: 16 }}>
-      <h1>Muammo joylashuvini tanlash</h1>
-      <p>Xaritani bosing yoki koordinatalarni kiriting.</p>
+    <main
+      style={{
+        maxWidth: 800,
+        margin: "24px auto",
+        padding: 16,
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <h1>Muammo joyini belgilang</h1>
+      <p>Xaritani bosib, muammo sodir bo‘lgan joyni tanlang.</p>
 
       <div style={{ height: 420, margin: "20px 0" }}>
         <LocationMap
-          lat={Number(lat)}
-          lng={Number(lng)}
+          lat={lat}
+          lng={lng}
           onPick={(a, b) => {
-            setLat(a.toFixed(6));
-            setLng(b.toFixed(6));
+            setLat(a);
+            setLng(b);
+            setPicked(true);
             setMessage("");
           }}
         />
       </div>
 
-      <button type="button" onClick={useMyLocation}>
-        Hozirgi joylashuvim
-      </button>
-
       <p>
-        <label>
-          Kenglik (latitude)
-          <input
-            style={{ display: "block", width: "100%", padding: 10 }}
-            value={lat}
-            onChange={(e) => setLat(e.target.value)}
-          />
-        </label>
+        {picked
+          ? `Tanlangan nuqta: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+          : "Xaritadan kerakli nuqtani bosing."}
       </p>
 
-      <p>
-        <label>
-          Uzunlik (longitude)
-          <input
-            style={{ display: "block", width: "100%", padding: 10 }}
-            value={lng}
-            onChange={(e) => setLng(e.target.value)}
-          />
-        </label>
-      </p>
-
-      <button type="button" disabled={busy || !token} onClick={sendLocation}>
-        {busy ? "Yuborilmoqda..." : "Joylashuvni tasdiqlash"}
+      <button
+        type="button"
+        disabled={busy || !token || !picked}
+        onClick={sendLocation}
+        style={{
+          width: "100%",
+          padding: "14px 18px",
+          border: "none",
+          borderRadius: 8,
+          background: busy || !token || !picked ? "#9ca3af" : "#16803d",
+          color: "white",
+          fontSize: 16,
+          fontWeight: 600,
+          cursor: busy || !token || !picked ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Yuborilmoqda..." : "📍 Joylashuvni yuborish"}
       </button>
 
-      {message && <p role="status">{message}</p>}
+      {message && (
+        <p role="status" style={{ marginTop: 16 }}>
+          {message}
+        </p>
+      )}
     </main>
   );
 }
