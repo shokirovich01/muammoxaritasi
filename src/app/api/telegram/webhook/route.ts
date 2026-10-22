@@ -117,6 +117,21 @@ async function getProfileId(
   return data.user.id;
 }
 
+async function createLocationToken(
+  db: ReturnType<typeof createAdminClient>,
+  telegramId: number
+): Promise<string> {
+  const token = randomUUID() + randomUUID();
+
+  const { error } = await db.from("telegram_location_tokens").insert({
+    token,
+    telegram_id: telegramId,
+    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  });
+
+  if (error) throw error;
+  return token;
+}
 function parseCoordinates(text: string): { lat: number; lng: number } | null {
   const match = text.trim().match(
     /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/
@@ -251,7 +266,18 @@ export async function POST(request: NextRequest) {
         step: "location", draft, updated_at: new Date().toISOString(),
       }).eq("telegram_id", telegramId);
 
-      await say(chatId, "Joylashuvni yuboring: tugma orqali lokatsiya jo‘nating yoki kenglik, uzunlikni kiriting (masalan: 41.2995, 69.2401).", {
+
+      const locationToken = await createLocationToken(db, telegramId);
+      const mapUrl = `https://muammoxaritasi.vercel.app/telegram/location?token=${locationToken}`;
+
+      await say(
+        chatId,
+        "Joylashuvni tanlang:\n\n1. Telefonda 📍 Joylashuvni yuborish tugmasidan foydalaning.\n2. 🗺 Xaritadan tanlash havolasini ochib, xaritani bosing.\n3. Koordinatalarni qo‘lda yuboring (masalan: 41.2995, 69.2401).",
+        {
+          inline_keyboard: [[{ text: "🗺 Xaritadan tanlash", url: mapUrl }]],
+        }
+      );
+      await say(chatId, "Telefonda lokatsiya yuborish uchun quyidagi tugmadan foydalaning.", {
         keyboard: [[{ text: "📍 Joylashuvni yuborish", request_location: true }]],
         resize_keyboard: true,
         one_time_keyboard: true,
