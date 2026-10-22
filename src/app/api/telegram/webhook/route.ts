@@ -272,20 +272,13 @@ export async function POST(request: NextRequest) {
 
       await say(
         chatId,
-        "Joylashuvni tanlang:\n\n1. Telefonda 📍 Joylashuvni yuborish tugmasidan foydalaning.\n2. 🗺 Xaritadan tanlash havolasini ochib, xaritani bosing.\n3. Koordinatalarni qo‘lda yuboring (masalan: 41.2995, 69.2401).",
+        "Joylashuvni tanlang:\n\n1. 🗺 Xaritadan tanlash tugmasini bosib, kerakli joyni belgilang.\n2. Koordinatalarni qo‘lda yuboring (masalan: 41.2995, 69.2401).",
         {
           inline_keyboard: [[{ text: "🗺 Xaritadan tanlash", url: mapUrl }]],
         }
       );
-      await say(chatId, "Telefonda lokatsiya yuborish uchun quyidagi tugmadan foydalaning.", {
-        keyboard: [[{ text: "📍 Joylashuvni yuborish", request_location: true }]],
-        resize_keyboard: true,
-        one_time_keyboard: true,
-      });
-    } else if (session.step === "location") {
-      const coords = message.location
-        ? { lat: message.location.latitude, lng: message.location.longitude }
-        : parseCoordinates(text);
+         } else if (session.step === "location") {
+    const coords = parseCoordinates(text);
 
       if (
         !coords ||
