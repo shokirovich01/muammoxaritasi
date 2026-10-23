@@ -1,4 +1,4 @@
-
+﻿
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -95,7 +95,7 @@ async function getProfileId(
     throw new Error("Telegram foydalanuvchi ID raqami topilmadi");
   }
 
-  // Telegram hisobi avval profilga bog'langanligini tekshirish.
+  // Telegram hisobi avval bog'langanmi?
   const { data: linked, error: lookupError } = await db
     .from("telegram_accounts")
     .select("profile_id")
@@ -119,9 +119,9 @@ async function getProfileId(
     return linked.profile_id;
   }
 
-  // Supabase Auth'da foydalanuvchi yaratish.
   const email = `telegram-${telegramId}@users.muammoxaritasi.app`;
 
+  // Avval yangi foydalanuvchi yaratishga urinamiz.
   const { data, error } = await db.auth.admin.createUser({
     email,
     password: randomUUID() + randomUUID(),
@@ -134,30 +134,63 @@ async function getProfileId(
     },
   });
 
+  let profileId: string | undefined = data.user?.id;
+
   if (error) {
-    console.error("Supabase createUser xatosi:", {
-      message: error.message,
-      status: error.status,
-      code: error.code,
-    });
+    const alreadyExists =
+      error.message.toLowerCase().includes("already been registered") ||
+      error.message.toLowerCase().includes("already exists");
 
-    throw new Error(
-      `Supabase foydalanuvchi yaratishda xato: ${error.message}`
+    if (!alreadyExists) {
+      console.error("Supabase createUser xatosi:", {
+        message: error.message,
+        status: error.status,
+        code: error.code,
+      });
+
+      throw new Error(
+        `Supabase foydalanuvchi yaratishda xato: ${error.message}`
+      );
+    }
+
+    // Email mavjud bo'lsa, mavjud foydalanuvchini topamiz.
+    const { data: usersData, error: usersError } =
+      await db.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+
+    if (usersError) {
+      console.error("Supabase listUsers xatosi:", usersError.message);
+
+      throw new Error(
+        `Mavjud foydalanuvchini qidirishda xato: ${usersError.message}`
+      );
+    }
+
+    const existingUser = usersData.users.find(
+      (user) => user.email?.toLowerCase() === email.toLowerCase()
     );
+
+    if (!existingUser) {
+      throw new Error(
+        "Email mavjud, ammo unga tegishli Supabase foydalanuvchisi topilmadi."
+      );
+    }
+
+    profileId = existingUser.id;
   }
 
-  if (!data.user) {
-    throw new Error(
-      "Supabase foydalanuvchi yaratilmadi: user ma'lumoti qaytmadi"
-    );
+  if (!profileId) {
+    throw new Error("Supabase foydalanuvchi ID raqami olinmadi");
   }
 
-  // Telegram hisobini yaratilgan profilga bog'lash.
+  // Telegram hisobini mavjud yoki yangi profilga bog'laymiz.
   const { error: linkError } = await db
     .from("telegram_accounts")
     .insert({
       telegram_id: telegramId,
-      profile_id: data.user.id,
+      profile_id: profileId,
     });
 
   if (linkError) {
@@ -168,12 +201,23 @@ async function getProfileId(
       hint: linkError.hint,
     });
 
+    // Boshqa so'rov bir vaqtda bog'lab ulgurgan bo'lishi mumkin.
+    const { data: retryLinked, error: retryError } = await db
+      .from("telegram_accounts")
+      .select("profile_id")
+      .eq("telegram_id", telegramId)
+      .maybeSingle();
+
+    if (!retryError && retryLinked?.profile_id) {
+      return retryLinked.profile_id;
+    }
+
     throw new Error(
       `Telegram hisobini profilga bog'lashda xato: ${linkError.message}`
     );
   }
 
-  return data.user.id;
+  return profileId;
 }
 
 function parseCoordinates(
@@ -244,7 +288,6 @@ export async function POST(request: NextRequest) {
   try {
     const db = createAdminClient();
 
-    // /cancel profil yaratishni talab qilmaydi.
     if (text === "/cancel") {
       const { error } = await db
         .from("telegram_sessions")
@@ -252,7 +295,9 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (error) {
-        throw new Error(`Suhbatni bekor qilishda xato: ${error.message}`);
+        throw new Error(
+          `Suhbatni bekor qilishda xato: ${error.message}`
+        );
       }
 
       await say(
@@ -263,7 +308,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Foydalanuvchi profilini topish yoki yaratish.
     const profileId = await getProfileId(db, message);
 
     if (text === "/start") {
@@ -277,7 +321,9 @@ export async function POST(request: NextRequest) {
         });
 
       if (error) {
-        throw new Error(`Suhbatni boshlashda xato: ${error.message}`);
+        throw new Error(
+          `Suhbatni boshlashda xato: ${error.message}`
+        );
       }
 
       await say(
@@ -329,10 +375,15 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (error) {
-        throw new Error(`Sarlavhani saqlashda xato: ${error.message}`);
+        throw new Error(
+          `Sarlavhani saqlashda xato: ${error.message}`
+        );
       }
 
-      await say(chatId, "Muammoni batafsil tushuntiring (10–2000 belgi).");
+      await say(
+        chatId,
+        "Muammoni batafsil tushuntiring (10–2000 belgi)."
+      );
     } else if (session.step === "description") {
       if (text.length < 10 || text.length > 2000) {
         await say(
@@ -355,7 +406,9 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (error) {
-        throw new Error(`Tavsifni saqlashda xato: ${error.message}`);
+        throw new Error(
+          `Tavsifni saqlashda xato: ${error.message}`
+        );
       }
 
       await say(
@@ -386,7 +439,9 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (error) {
-        throw new Error(`Muammo turini saqlashda xato: ${error.message}`);
+        throw new Error(
+          `Muammo turini saqlashda xato: ${error.message}`
+        );
       }
 
       await say(chatId, "Viloyat yoki hudud nomini kiriting.");
@@ -408,7 +463,9 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (error) {
-        throw new Error(`Hududni saqlashda xato: ${error.message}`);
+        throw new Error(
+          `Hududni saqlashda xato: ${error.message}`
+        );
       }
 
       await say(
@@ -486,7 +543,10 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (deleteError) {
-        console.error("Suhbatni o'chirish xatosi:", deleteError.message);
+        console.error(
+          "Suhbatni o'chirish xatosi:",
+          deleteError.message
+        );
       }
 
       await say(
@@ -501,10 +561,15 @@ export async function POST(request: NextRequest) {
         .eq("telegram_id", telegramId);
 
       if (error) {
-        throw new Error(`Suhbatni qayta boshlashda xato: ${error.message}`);
+        throw new Error(
+          `Suhbatni qayta boshlashda xato: ${error.message}`
+        );
       }
 
-      await say(chatId, "Suhbat qayta boshlandi. /start yuboring.");
+      await say(
+        chatId,
+        "Suhbat qayta boshlandi. /start yuboring."
+      );
     }
   } catch (error) {
     console.error("Telegram webhook xatosi:", error);
@@ -515,7 +580,10 @@ export async function POST(request: NextRequest) {
         "Kechirasiz, so‘rovda xatolik yuz berdi. Iltimos, /start orqali qayta urinib ko‘ring."
       );
     } catch (telegramError) {
-      console.error("Telegramga xabar yuborish xatosi:", telegramError);
+      console.error(
+        "Telegramga xabar yuborish xatosi:",
+        telegramError
+      );
     }
   }
 
